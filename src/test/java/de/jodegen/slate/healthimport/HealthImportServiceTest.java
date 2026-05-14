@@ -24,7 +24,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -66,7 +65,7 @@ class HealthImportServiceTest {
                 new SleepSample(4, endDate.minusHours(2), endDate.minusHours(1), 3600),
                 new SleepSample(5, endDate.minusHours(1), endDate, 3600)
         );
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), null, samples, null);
+        HealthImportRequest request = new HealthImportRequest(null, samples, null);
 
         when(sleepRepository.findByUserAndDate(eq(user), any())).thenReturn(Optional.empty());
         when(sleepRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -88,7 +87,7 @@ class HealthImportServiceTest {
                 new SleepSample(0, endDate.minusHours(8), endDate, 28800), // inBed — ignored
                 new SleepSample(2, endDate.minusHours(1), endDate, 3600)   // awake — ignored
         );
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), null, samples, null);
+        HealthImportRequest request = new HealthImportRequest(null, samples, null);
 
         HealthImportResponse result = service.processImport(user, request);
 
@@ -106,7 +105,7 @@ class HealthImportServiceTest {
         List<SleepSample> samples = List.of(
                 new SleepSample(3, endDate.minusHours(2), endDate, 7200)
         );
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), null, samples, null);
+        HealthImportRequest request = new HealthImportRequest(null, samples, null);
 
         when(sleepRepository.findByUserAndDate(user, date)).thenReturn(Optional.of(existing));
         when(sleepRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -128,7 +127,7 @@ class HealthImportServiceTest {
         LocalDate date = LocalDate.of(2026, 5, 14);
         OffsetDateTime dt = OffsetDateTime.of(2026, 5, 14, 12, 0, 0, 0, ZoneOffset.UTC);
         List<StepSample> steps = List.of(new StepSample(12000, dt));
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), steps, null, null);
+        HealthImportRequest request = new HealthImportRequest(steps, null, null);
 
         when(routineRepository.findByUserAndDate(user, date)).thenReturn(Optional.empty());
         when(routineRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -146,7 +145,7 @@ class HealthImportServiceTest {
     void steps_value_lt_10000_does_not_update_routine() {
         OffsetDateTime dt = OffsetDateTime.of(2026, 5, 14, 12, 0, 0, 0, ZoneOffset.UTC);
         List<StepSample> steps = List.of(new StepSample(9999, dt));
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), steps, null, null);
+        HealthImportRequest request = new HealthImportRequest(steps, null, null);
 
         HealthImportResponse result = service.processImport(user, request);
 
@@ -164,7 +163,7 @@ class HealthImportServiceTest {
                 .id(UUID.randomUUID()).user(user).date(date)
                 .completedItems(new ArrayList<>(List.of("steps", "water")))
                 .build();
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), steps, null, null);
+        HealthImportRequest request = new HealthImportRequest(steps, null, null);
 
         when(routineRepository.findByUserAndDate(user, date)).thenReturn(Optional.of(existing));
 
@@ -183,7 +182,7 @@ class HealthImportServiceTest {
         OffsetDateTime start = OffsetDateTime.of(2026, 5, 13, 10, 0, 0, 0, ZoneOffset.UTC);
         OffsetDateTime end = start.plusMinutes(47);
         List<WorkoutSample> workouts = List.of(new WorkoutSample("Indoor Cycling", 2820, start, end));
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), null, null, workouts);
+        HealthImportRequest request = new HealthImportRequest(null, null, workouts);
 
         TrainingDay savedDay = TrainingDay.builder()
                 .id(UUID.randomUUID()).user(user).date(date).plannedType(TrainingType.PULL).sessions(new ArrayList<>()).build();
@@ -215,7 +214,7 @@ class HealthImportServiceTest {
         LocalDate date = LocalDate.of(2026, 5, 14);
         OffsetDateTime start = OffsetDateTime.of(2026, 5, 14, 10, 0, 0, 0, ZoneOffset.UTC);
         List<WorkoutSample> workouts = List.of(new WorkoutSample("Running", 3600, start, start.plusHours(1)));
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), null, null, workouts);
+        HealthImportRequest request = new HealthImportRequest(null, null, workouts);
 
         TrainingDay existingDay = TrainingDay.builder()
                 .id(UUID.randomUUID()).user(user).date(date).plannedType(TrainingType.PULL).sessions(new ArrayList<>()).build();
@@ -237,7 +236,7 @@ class HealthImportServiceTest {
         LocalDate date = LocalDate.of(2026, 5, 14);
         OffsetDateTime start = OffsetDateTime.of(2026, 5, 14, 10, 0, 0, 0, ZoneOffset.UTC);
         List<WorkoutSample> workouts = List.of(new WorkoutSample("Indoor Cycling", 2820, start, start.plusMinutes(47)));
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), null, null, workouts);
+        HealthImportRequest request = new HealthImportRequest(null, null, workouts);
 
         TrainingSession duplicate = TrainingSession.builder()
                 .id(UUID.randomUUID())
@@ -263,7 +262,7 @@ class HealthImportServiceTest {
 
     @Test
     void empty_request_returns_all_zeros() {
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), List.of(), List.of(), List.of());
+        HealthImportRequest request = new HealthImportRequest(List.of(), List.of(), List.of());
 
         HealthImportResponse result = service.processImport(user, request);
 
@@ -276,7 +275,7 @@ class HealthImportServiceTest {
 
     @Test
     void null_lists_returns_all_zeros() {
-        HealthImportRequest request = new HealthImportRequest(Instant.now(), null, null, null);
+        HealthImportRequest request = new HealthImportRequest(null, null, null);
 
         HealthImportResponse result = service.processImport(user, request);
 
