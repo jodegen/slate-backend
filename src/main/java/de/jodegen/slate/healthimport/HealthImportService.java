@@ -1,148 +1,130 @@
 package de.jodegen.slate.healthimport;
 
 import de.jodegen.slate.common.DataSource;
-import de.jodegen.slate.healthimport.dto.HealthImportRequest;
-import de.jodegen.slate.healthimport.dto.HealthImportResponse;
-import de.jodegen.slate.healthimport.dto.SleepSample;
-import de.jodegen.slate.healthimport.dto.StepSample;
-import de.jodegen.slate.healthimport.dto.WorkoutSample;
+import de.jodegen.slate.common.exception.ValidationException;
+import de.jodegen.slate.healthimport.dto.SleepImportRequest;
+import de.jodegen.slate.healthimport.dto.SleepImportResponse;
+import de.jodegen.slate.healthimport.dto.StepsImportRequest;
+import de.jodegen.slate.healthimport.dto.StepsImportResponse;
 import de.jodegen.slate.routine.RoutineLog;
 import de.jodegen.slate.routine.RoutineRepository;
 import de.jodegen.slate.sleep.SleepLog;
 import de.jodegen.slate.sleep.SleepRepository;
-import de.jodegen.slate.training.TrainingDay;
-import de.jodegen.slate.training.TrainingDayRepository;
-import de.jodegen.slate.training.TrainingSession;
-import de.jodegen.slate.training.TrainingSessionRepository;
-import de.jodegen.slate.training.TrainingType;
 import de.jodegen.slate.user.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.Arrays;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
-@Transactional
 public class HealthImportService {
+
+    private static final Set<String> COUNTED_SLEEP_PHASES = Set.of("Core", "Deep", "REM", "Asleep");
 
     private final SleepRepository sleepRepository;
     private final RoutineRepository routineRepository;
-    private final TrainingDayRepository trainingDayRepository;
-    private final TrainingSessionRepository trainingSessionRepository;
-    private final WorkoutTypeMapper workoutTypeMapper;
 
-    public HealthImportResponse processImport(User user, HealthImportRequest request) {
-        int sleepUpserted = processSleep(user, request.sleep());
-        int stepsProcessed = 0;
-        int routineUpdated = 0;
-        if (request.steps() != null) {
-            int[] stepResults = processSteps(user, request.steps());
-            stepsProcessed = stepResults[0];
-            routineUpdated = stepResults[1];
+    @Transactional
+    public StepsImportResponse processSteps(User user, StepsImportRequest request) {
+        String[] stepTokens = parseTokens(request.steps());
+        String[] dateTokens = parseTokens(request.dateTimes());
+
+        if (stepTokens.length == 0) {
+            throw new ValidationException("steps payload must not be empty");
         }
-        int workoutsCreated = processWorkouts(user, request.workouts());
-        return new HealthImportResponse(sleepUpserted, stepsProcessed, routineUpdated, workoutsCreated);
+        if (stepTokens.length != dateTokens.length) {
+            throw new ValidationException("steps and dateTimes must have equal length");
+        }
+
+        int totalSteps = 0;
+        for (String s : stepTokens) {
+            try {
+                totalSteps += Integer.parseInt(s);
+            } catch (NumberFormatException e) {
+                throw new ValidationException("Invalid step value: " + s);
+            }
+        }
+
+        LocalDate date;
+        try {
+            date = OffsetDateTime.parse(dateTokens[0]).toLocalDate();
+        } catch (DateTimeParseException e) {
+            throw new ValidationException("Invalid dateTime format: " + dateTokens[0]);
+        }
+
+        boolean updated = false;
+        if (totalSteps >= 10000) {
+            RoutineLog log = routineRepository.findByUserAndDate(user, date)
+                    .orElseGet(() -> RoutineLog.builder().user(user).date(date).completedItems(new ArrayList<>()).build());
+            if (!log.getCompletedItems().contains("steps")) {
+                log.getCompletedItems().add("steps");
+                routineRepository.save(log);
+                updated = true;
+            }
+        }
+
+        return new StepsImportResponse(totalSteps, updated);
     }
 
-    private int processSleep(User user, List<SleepSample> samples) {
-        if (samples == null || samples.isEmpty()) return 0;
+    @Transactional
+    public SleepImportResponse processSleep(User user, SleepImportRequest request) {
+        String[] starts = parseTokens(request.sleepStartTimes());
+        String[] ends = parseTokens(request.sleepEndTimes());
+        String[] phases = parseTokens(request.sleepPhases());
 
-        Map<LocalDate, Long> secondsByDate = samples.stream()
-                .filter(s -> s.sleepStage() == 3 || s.sleepStage() == 4 || s.sleepStage() == 5)
-                .collect(Collectors.groupingBy(
-                        s -> s.endDate().toInstant().atZone(ZoneOffset.UTC).toLocalDate(),
-                        Collectors.summingLong(SleepSample::durationSeconds)
-                ));
-
-        int upserted = 0;
-        for (Map.Entry<LocalDate, Long> entry : secondsByDate.entrySet()) {
-            LocalDate date = entry.getKey();
-            int durationMinutes = (int) Math.round(entry.getValue() / 60.0);
-
-            SleepLog log = sleepRepository.findByUserAndDate(user, date)
-                    .orElseGet(() -> SleepLog.builder().user(user).date(date).build());
-            log.setDurationMinutes(durationMinutes);
-            log.setSource(DataSource.HEALTH_IMPORT);
-            sleepRepository.save(log);
-            upserted++;
+        if (starts.length == 0) {
+            throw new ValidationException("sleepStartTimes must not be empty");
         }
-        return upserted;
-    }
+        if (starts.length != ends.length || starts.length != phases.length) {
+            throw new ValidationException("sleepStartTimes, sleepEndTimes, and sleepPhases must have equal length");
+        }
 
-    private int[] processSteps(User user, List<StepSample> samples) {
-        int stepsProcessed = 0;
-        int routineUpdated = 0;
-
-        for (StepSample sample : samples) {
-            stepsProcessed++;
-            if (sample.value() >= 10000) {
-                LocalDate date = sample.date().toInstant().atZone(ZoneOffset.UTC).toLocalDate();
-                RoutineLog log = routineRepository.findByUserAndDate(user, date)
-                        .orElseGet(() -> RoutineLog.builder().user(user).date(date).completedItems(new ArrayList<>()).build());
-                if (!log.getCompletedItems().contains("steps")) {
-                    log.getCompletedItems().add("steps");
-                    routineRepository.save(log);
-                    routineUpdated++;
+        long totalSeconds = 0;
+        for (int i = 0; i < starts.length; i++) {
+            if (!COUNTED_SLEEP_PHASES.contains(phases[i]) && !"Awake".equals(phases[i])) {
+                throw new ValidationException("Unknown sleep phase: " + phases[i]);
+            }
+            if (COUNTED_SLEEP_PHASES.contains(phases[i])) {
+                try {
+                    OffsetDateTime start = OffsetDateTime.parse(starts[i]);
+                    OffsetDateTime end = OffsetDateTime.parse(ends[i]);
+                    totalSeconds += ChronoUnit.SECONDS.between(start, end);
+                } catch (DateTimeParseException e) {
+                    throw new ValidationException("Invalid timestamp in sleep data at index " + i);
                 }
             }
         }
-        return new int[]{stepsProcessed, routineUpdated};
-    }
 
-    private int processWorkouts(User user, List<WorkoutSample> samples) {
-        if (samples == null || samples.isEmpty()) return 0;
+        int durationMinutes = (int) (totalSeconds / 60);
 
-        int created = 0;
-        for (WorkoutSample sample : samples) {
-            LocalDate date = sample.startDate().toInstant().atZone(ZoneOffset.UTC).toLocalDate();
-            TrainingType type = workoutTypeMapper.map(sample.workoutType());
-            int durationMinutes = (int) Math.round(sample.durationSeconds() / 60.0);
-
-            TrainingDay day = trainingDayRepository.findByUserAndDate(user, date)
-                    .orElseGet(() -> {
-                        TrainingDay newDay = TrainingDay.builder()
-                                .user(user)
-                                .date(date)
-                                .plannedType(plannedTypeForDate(date))
-                                .sessions(new ArrayList<>())
-                                .build();
-                        return trainingDayRepository.save(newDay);
-                    });
-
-            List<TrainingSession> existing = trainingSessionRepository.findByTrainingDay(day);
-            boolean duplicate = existing.stream().anyMatch(s ->
-                    s.getSource() == DataSource.HEALTH_IMPORT
-                    && sample.workoutType().equals(s.getSourceType())
-                    && durationMinutes == s.getDurationMinutes());
-            if (duplicate) continue;
-
-            TrainingSession session = TrainingSession.builder()
-                    .trainingDay(day)
-                    .type(type)
-                    .durationMinutes(durationMinutes)
-                    .source(DataSource.HEALTH_IMPORT)
-                    .sourceType(sample.workoutType())
-                    .build();
-            trainingSessionRepository.save(session);
-            created++;
+        LocalDate date;
+        try {
+            date = OffsetDateTime.parse(ends[ends.length - 1]).toLocalDate();
+        } catch (DateTimeParseException e) {
+            throw new ValidationException("Invalid timestamp format in sleepEndTimes");
         }
-        return created;
+
+        SleepLog log = sleepRepository.findByUserAndDate(user, date)
+                .orElseGet(() -> SleepLog.builder().user(user).date(date).build());
+        log.setDurationMinutes(durationMinutes);
+        log.setSource(DataSource.HEALTH_IMPORT);
+        sleepRepository.save(log);
+
+        return new SleepImportResponse(date, durationMinutes, true);
     }
 
-    private TrainingType plannedTypeForDate(LocalDate date) {
-        return switch (date.getDayOfWeek()) {
-            case MONDAY, FRIDAY -> TrainingType.PUSH;
-            case WEDNESDAY -> TrainingType.PULL;
-            case TUESDAY, THURSDAY, SATURDAY -> TrainingType.CARDIO;
-            case SUNDAY -> TrainingType.REST;
-        };
+    private String[] parseTokens(String raw) {
+        return Arrays.stream(raw.split("\r?\n"))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toArray(String[]::new);
     }
 }

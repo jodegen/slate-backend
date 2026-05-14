@@ -2,8 +2,8 @@ package de.jodegen.slate.healthimport;
 
 import de.jodegen.slate.auth.CustomUserDetailsService;
 import de.jodegen.slate.auth.JwtService;
-import de.jodegen.slate.healthimport.dto.HealthImportRequest;
-import de.jodegen.slate.healthimport.dto.HealthImportResponse;
+import de.jodegen.slate.healthimport.dto.SleepImportResponse;
+import de.jodegen.slate.healthimport.dto.StepsImportResponse;
 import de.jodegen.slate.user.User;
 import de.jodegen.slate.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +28,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(HealthImportController.class)
 class HealthImportControllerTest {
+
+    // The default key from application.yml: ${IMPORT_API_KEY:dev-import-key}
+    private static final String VALID_KEY = "dev-import-key";
 
     @Autowired MockMvc mockMvc;
     @MockitoBean HealthImportService healthImportService;
@@ -43,71 +47,85 @@ class HealthImportControllerTest {
                 .email("test@test.com")
                 .name("Test User")
                 .build();
+        when(userRepository.findAll()).thenReturn(List.of(mockUser));
     }
 
     @Test
-    void shouldReturn200WithResult_whenValidRequest() throws Exception {
-        when(healthImportService.processImport(any(User.class), any(HealthImportRequest.class)))
-                .thenReturn(new HealthImportResponse(2, 3, 1, 1));
+    void steps_shouldReturn200_whenValidKeyAndPayload() throws Exception {
+        when(healthImportService.processSteps(any(User.class), any()))
+                .thenReturn(new StepsImportResponse(10500, true));
 
-        mockMvc.perform(post("/api/health/import")
-                        .with(user(mockUser)).with(csrf())
+        mockMvc.perform(post("/api/health/import/steps").with(user(mockUser)).with(csrf())
+                        .header("X-Import-Key", VALID_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "sentAt": "2026-05-15T08:30:00.000Z",
-                                  "steps": [],
-                                  "sleep": [],
-                                  "workouts": []
+                                  "steps": "5000\\n5500",
+                                  "dateTimes": "2026-05-14T08:00:00+02:00\\n2026-05-14T10:00:00+02:00"
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.sleepUpserted").value(2))
-                .andExpect(jsonPath("$.stepsProcessed").value(3))
-                .andExpect(jsonPath("$.routineUpdated").value(1))
-                .andExpect(jsonPath("$.workoutsCreated").value(1));
+                .andExpect(jsonPath("$.totalSteps").value(10500))
+                .andExpect(jsonPath("$.routineUpdated").value(true));
     }
 
     @Test
-    void shouldReturn400_whenMissingRequiredFields() throws Exception {
-        mockMvc.perform(post("/api/health/import")
-                        .with(user(mockUser)).with(csrf())
+    void steps_shouldReturn401_whenMissingApiKey() throws Exception {
+        mockMvc.perform(post("/api/health/import/steps").with(user(mockUser)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"steps": "1000", "dateTimes": "2026-05-14T08:00:00+02:00"}
+                                """))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void steps_shouldReturn401_whenWrongApiKey() throws Exception {
+        mockMvc.perform(post("/api/health/import/steps").with(user(mockUser)).with(csrf())
+                        .header("X-Import-Key", "wrong-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"steps": "1000", "dateTimes": "2026-05-14T08:00:00+02:00"}
+                                """))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void steps_shouldReturn400_whenMissingRequiredFields() throws Exception {
+        mockMvc.perform(post("/api/health/import/steps").with(user(mockUser)).with(csrf())
+                        .header("X-Import-Key", VALID_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    void shouldReturn401_whenUnauthenticated() throws Exception {
-        mockMvc.perform(post("/api/health/import")
-                        .with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"sentAt":"2026-05-15T08:30:00.000Z"}
-                                """))
-                .andExpect(status().isUnauthorized());
-    }
+    void sleep_shouldReturn200_whenValidKeyAndPayload() throws Exception {
+        when(healthImportService.processSleep(any(User.class), any()))
+                .thenReturn(new SleepImportResponse(LocalDate.of(2026, 5, 14), 420, true));
 
-    @Test
-    void shouldReturn200WithAllZeros_whenEmptyLists() throws Exception {
-        when(healthImportService.processImport(any(User.class), any(HealthImportRequest.class)))
-                .thenReturn(new HealthImportResponse(0, 0, 0, 0));
-
-        mockMvc.perform(post("/api/health/import")
-                        .with(user(mockUser)).with(csrf())
+        mockMvc.perform(post("/api/health/import/sleep").with(user(mockUser)).with(csrf())
+                        .header("X-Import-Key", VALID_KEY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "sentAt": "2026-05-15T08:30:00.000Z",
-                                  "steps": [],
-                                  "sleep": [],
-                                  "workouts": []
+                                  "sleepStartTimes": "2026-05-14T00:00:00+02:00",
+                                  "sleepEndTimes": "2026-05-14T07:00:00+02:00",
+                                  "sleepPhases": "Core"
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.sleepUpserted").value(0))
-                .andExpect(jsonPath("$.stepsProcessed").value(0))
-                .andExpect(jsonPath("$.routineUpdated").value(0))
-                .andExpect(jsonPath("$.workoutsCreated").value(0));
+                .andExpect(jsonPath("$.durationMinutes").value(420))
+                .andExpect(jsonPath("$.upserted").value(true));
+    }
+
+    @Test
+    void sleep_shouldReturn401_whenMissingApiKey() throws Exception {
+        mockMvc.perform(post("/api/health/import/sleep").with(user(mockUser)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sleepStartTimes": "...", "sleepEndTimes": "...", "sleepPhases": "Core"}
+                                """))
+                .andExpect(status().isUnauthorized());
     }
 }
