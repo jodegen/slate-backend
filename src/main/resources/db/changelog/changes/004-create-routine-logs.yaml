@@ -1,0 +1,41 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-create-routine-logs
+      author: slate
+      changes:
+        - createTable:
+            tableName: routine_logs
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: date
+                  type: date
+                  constraints:
+                    nullable: false
+              - column:
+                  name: completed_items
+                  type: TEXT
+              - column:
+                  name: created_at
+                  type: timestamptz
+        - addUniqueConstraint:
+            tableName: routine_logs
+            columnNames: user_id, date
+            constraintName: uq_routine_user_date
+        - addForeignKeyConstraint:
+            baseTableName: routine_logs
+            baseColumnNames: user_id
+            referencedTableName: users
+            referencedColumnNames: id
+            constraintName: fk_routine_logs_user
+            onDelete: CASCADE

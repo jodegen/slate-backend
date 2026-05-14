@@ -1,0 +1,46 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-create-weight-entries
+      author: slate
+      changes:
+        - createTable:
+            tableName: weight_entries
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: date
+                  type: date
+                  constraints:
+                    nullable: false
+              - column:
+                  name: kg
+                  type: double precision
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamptz
+                  defaultValueComputed: now()
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: weight_entries
+            columnNames: user_id, date
+            constraintName: uq_weight_entries_user_date
+        - addForeignKeyConstraint:
+            baseTableName: weight_entries
+            baseColumnNames: user_id
+            referencedTableName: users
+            referencedColumnNames: id
+            constraintName: fk_weight_entries_user
+            onDelete: CASCADE

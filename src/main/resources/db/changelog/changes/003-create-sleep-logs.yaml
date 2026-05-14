@@ -1,0 +1,51 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-create-sleep-logs
+      author: slate
+      changes:
+        - createTable:
+            tableName: sleep_logs
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: date
+                  type: date
+                  constraints:
+                    nullable: false
+              - column:
+                  name: duration_minutes
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: source
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamptz
+                  defaultValueComputed: now()
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: sleep_logs
+            columnNames: user_id, date
+            constraintName: uq_sleep_logs_user_date
+        - addForeignKeyConstraint:
+            baseTableName: sleep_logs
+            baseColumnNames: user_id
+            referencedTableName: users
+            referencedColumnNames: id
+            constraintName: fk_sleep_logs_user
+            onDelete: CASCADE

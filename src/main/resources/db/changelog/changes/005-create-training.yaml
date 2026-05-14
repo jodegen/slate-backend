@@ -1,0 +1,121 @@
+databaseChangeLog:
+  - changeSet:
+      id: 005-create-training
+      author: slate
+      changes:
+        - createTable:
+            tableName: training_days
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: date
+                  type: date
+                  constraints:
+                    nullable: false
+              - column:
+                  name: planned_type
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamptz
+
+        - createTable:
+            tableName: training_sessions
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: training_day_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: type
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: duration_minutes
+                  type: int
+              - column:
+                  name: source
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamptz
+
+        - createTable:
+            tableName: exercise_sets
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: session_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: exercise_name
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: reps
+                  type: int
+              - column:
+                  name: weight_kg
+                  type: double precision
+              - column:
+                  name: created_at
+                  type: timestamptz
+
+        - addUniqueConstraint:
+            tableName: training_days
+            columnNames: user_id, date
+            constraintName: uq_training_day_user_date
+
+        - addForeignKeyConstraint:
+            baseTableName: training_days
+            baseColumnNames: user_id
+            referencedTableName: users
+            referencedColumnNames: id
+            constraintName: fk_training_days_user
+            onDelete: CASCADE
+
+        - addForeignKeyConstraint:
+            baseTableName: training_sessions
+            baseColumnNames: training_day_id
+            referencedTableName: training_days
+            referencedColumnNames: id
+            constraintName: fk_training_sessions_day
+            onDelete: CASCADE
+
+        - addForeignKeyConstraint:
+            baseTableName: exercise_sets
+            baseColumnNames: session_id
+            referencedTableName: training_sessions
+            referencedColumnNames: id
+            constraintName: fk_exercise_sets_session
+            onDelete: CASCADE

@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 006-add-source-type-to-training-sessions
+      author: slate
+      changes:
+        - addColumn:
+            tableName: training_sessions
+            columns:
+              - column:
+                  name: source_type
+                  type: VARCHAR(255)
