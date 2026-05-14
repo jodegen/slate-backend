@@ -14,7 +14,7 @@ sudo apt install -y git curl ufw
 
 ## 2. Docker installieren
 
-> Java und PostgreSQL müssen **nicht** direkt auf dem Server installiert werden — beides läuft in Docker-Containern. Docker ist alles was du brauchst.
+> Java muss **nicht** direkt auf dem Server installiert werden — die App läuft im Docker-Container. PostgreSQL läuft hingegen nativ auf dem Server (siehe Schritt 3).
 
 ```bash
 # Docker GPG Key + Repository hinzufügen
@@ -38,7 +38,74 @@ docker compose version
 
 ---
 
-## 3. Node.js installieren (für Next.js Frontend)
+## 3. PostgreSQL 16 installieren
+
+```bash
+# PostgreSQL Repository hinzufügen
+sudo apt install -y gnupg
+curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg
+
+echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | \
+  sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+
+sudo apt update
+sudo apt install -y postgresql-16
+
+# Testen
+sudo systemctl status postgresql
+```
+
+### Datenbank und User anlegen
+
+```bash
+sudo -u postgres psql
+```
+
+Im psql-Prompt:
+
+```sql
+CREATE USER slate WITH PASSWORD 'sicheres_passwort_hier';
+CREATE DATABASE slate OWNER slate;
+\q
+```
+
+### PostgreSQL für Docker-Zugriff konfigurieren
+
+Der Docker-Container verbindet sich über `host.docker.internal` mit der nativen PostgreSQL-Instanz. Dafür muss PostgreSQL Verbindungen von Docker-Netzwerkadressen akzeptieren:
+
+```bash
+# PostgreSQL-Konfigurationsdateien finden
+sudo -u postgres psql -c "SHOW config_file;"
+sudo -u postgres psql -c "SHOW hba_file;"
+
+# postgresql.conf: listen_addresses anpassen
+sudo nano /etc/postgresql/16/main/postgresql.conf
+```
+
+Zeile finden und ändern:
+```
+listen_addresses = 'localhost'   →   listen_addresses = '*'
+```
+
+```bash
+# pg_hba.conf: Docker-Subnetz erlauben
+sudo nano /etc/postgresql/16/main/pg_hba.conf
+```
+
+Am Ende der Datei hinzufügen:
+```
+# Allow Docker containers
+host    slate    slate    172.17.0.0/16    scram-sha-256
+```
+
+```bash
+# PostgreSQL neu starten
+sudo systemctl restart postgresql
+```
+
+---
+
+## 4. Node.js installieren (für Next.js Frontend)
 
 ```bash
 # Node.js 20 LTS via NodeSource
@@ -52,7 +119,7 @@ npm --version
 
 ---
 
-## 4. Firewall konfigurieren
+## 5. Firewall konfigurieren
 
 ```bash
 sudo ufw allow OpenSSH
@@ -63,7 +130,7 @@ sudo ufw status
 
 ---
 
-## 5. Projekt auf den Server bringen
+## 6. Projekt auf den Server bringen
 
 ```bash
 # Projektverzeichnis anlegen
@@ -75,7 +142,7 @@ git clone https://github.com/jodegen/slate-backend.git .
 
 ---
 
-## 6. Umgebungsvariablen konfigurieren
+## 7. Umgebungsvariablen konfigurieren
 
 ```bash
 cd ~/apps/slate
@@ -93,8 +160,8 @@ nano .env
 Vollständiger Inhalt der `.env`:
 
 ```env
-# Datenbank
-DB_URL=jdbc:postgresql://db:5432/slate
+# Datenbank — host.docker.internal erreicht PostgreSQL auf dem Host
+DB_URL=jdbc:postgresql://host.docker.internal:5432/slate
 DB_USER=slate
 DB_PASSWORD=sicheres_passwort_hier
 
@@ -109,11 +176,11 @@ CORS_ALLOWED_ORIGINS=https://slate.jodegen.de
 
 > **Hinweis:** `nano` speichern mit `Ctrl+O`, beenden mit `Ctrl+X`
 
-> **Wichtig:** `DB_URL` muss `db` als Hostname enthalten (der Docker-interne Servicename aus `docker-compose.yml`), nicht `localhost`.
+> **Wichtig:** `host.docker.internal` ist der spezielle Hostname, über den Docker-Container den Host-Server erreichen. Das funktioniert durch `extra_hosts` in `docker-compose.yml`.
 
 ---
 
-## 7. Starten
+## 8. Starten
 
 ```bash
 # Image bauen und Stack starten
@@ -130,7 +197,7 @@ Die API ist jetzt unter `http://DEINE-SERVER-IP:8080` erreichbar.
 
 ---
 
-## 8. Testen
+## 9. Testen
 
 ```bash
 # Health-Check — sollte 401 zurückgeben (API läuft)
@@ -144,7 +211,7 @@ curl -s -X POST http://localhost:8080/api/auth/register \
 
 ---
 
-## 9. Nützliche Befehle
+## 10. Nützliche Befehle
 
 ```bash
 # Stack stoppen
@@ -168,7 +235,7 @@ docker compose ps
 
 ---
 
-## 10. Updates deployen
+## 11. Updates deployen
 
 ```bash
 cd ~/apps/slate
@@ -182,7 +249,7 @@ docker compose up --build -d
 
 ---
 
-## 11. Nginx als Reverse Proxy + HTTPS
+## 12. Nginx als Reverse Proxy + HTTPS
 
 Da das Frontend (Next.js) ebenfalls auf dem Server laufen wird, übernimmt Nginx das Routing für beide Domains:
 - `api.slate.jodegen.de` → Backend (Port 8080)
