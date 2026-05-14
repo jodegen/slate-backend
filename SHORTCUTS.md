@@ -1,93 +1,112 @@
 # iOS Shortcuts – Health Import Guide
 
 Base URL: `http://<SERVER-IP>:8080`  
-Endpoint: `POST /api/health/import`  
-Content-Type: `application/json`
+Alle Endpoints: kein Auth-Token nötig (temporär)
 
 ---
 
-## JSON Format
+## Endpoint 1: Steps
+
+`POST /api/health/import/steps`
 
 ```json
 {
-  "date": "2026-05-14",
-  "steps": 8432,
-  "sleepMinutes": 420,
-  "workouts": [
-    {
-      "type": "Running",
-      "durationMinutes": 45,
-      "startDate": "2026-05-14T07:00:00+02:00"
-    }
-  ]
+  "steps":     "18\n54\n0\n...\n0",
+  "dateTimes": "2026-05-14T00:56:15+02:00\n...\n2026-05-15T00:00:00+02:00"
 }
 ```
 
-Alle Felder sind optional — nur vorhandene Daten werden verarbeitet.
-
----
-
-## Shortcut 1: Steps
-
-**HealthKit Query**
+### Shortcut-Konfiguration
 | Feld | Wert |
 |---|---|
 | Type | Steps |
 | Start Date | is today |
 | Unit | count |
-| Group By | — (kein Group By, Summe) |
+| Group By | Hour |
+| Fill Missing | on |
+| Sort By | Start Date, Oldest First |
 
-**Aktion im Shortcut**
-1. „Find Health Samples" → Steps → Start Date is today
-2. „Calculate Statistics" → Sum → Variable `totalSteps`
-3. JSON bauen:
-   ```json
-   { "date": "<today>", "steps": <totalSteps> }
-   ```
-4. POST an `/api/health/import`
+### Felder
+- `steps` → Values (step count per hour, newline-separated)
+- `dateTimes` → Start Dates (timestamps, newline-separated)
+
+### Serverseitige Logik
+- **Datum** = Datum des ersten `dateTimes`-Eintrags
+- **Gesamtschritte** = Summe aller `steps`-Werte
+- Falls `totalSteps >= 10.000` → `"steps"` zu `RoutineLog.completedItems` hinzufügen
 
 ---
 
-## Shortcut 2: Sleep
+## Endpoint 2: Sleep
 
-**HealthKit Query**
+`POST /api/health/import/sleep`
+
+```json
+{
+  "sleepStartTimes": "2026-04-19T02:34:38+02:00\n...",
+  "sleepEndTimes":   "2026-04-19T02:48:08+02:00\n...\n2026-04-20T00:02:46+02:00",
+  "sleepPhases":     "Core\nAwake\nCore\nDeep\n..."
+}
+```
+
+### Shortcut-Konfiguration
 | Feld | Wert |
 |---|---|
 | Type | Sleep Analysis |
-| Start Date | yesterday (Schlaf beginnt vor Mitternacht) |
+| Start Date | yesterday |
 | End Date | today |
+| Sort By | Start Date, Oldest First |
 
-**Relevante Stage-Werte (Apple intern)**
-| Wert | Bedeutung |
-|---|---|
-| 0 | In Bed |
-| 1 | Asleep (generic) |
-| 2 | Awake |
-| 3 | Core |
-| 4 | Deep |
-| 5 | REM |
+### Felder
+- `sleepStartTimes` → Start Dates
+- `sleepEndTimes` → End Dates
+- `sleepPhases` → Values (Core / REM / Deep / Awake / Asleep)
 
-**Aktion im Shortcut**
-1. „Find Health Samples" → Sleep Analysis → Start Date is yesterday, End Date is today
-2. Für jeden Eintrag: falls Stage ≠ Awake (≠ 2) → Duration addieren
-3. `sleepMinutes` = Summe der Nicht-Awake-Dauern in Minuten
-4. JSON bauen:
-   ```json
-   { "date": "<today>", "sleepMinutes": <sleepMinutes> }
-   ```
-5. POST an `/api/health/import`
+### Serverseitige Logik
+- **Datum** = Datum des letzten `sleepEndTimes`-Eintrags (= Aufwachdatum, Mitternacht-Crossing korrekt)
+- **durationMinutes** = Summe von `(endTime[N] - startTime[N])` wo `phase[N] != "Awake"`
+- Upsert `SleepLog` für das Datum
+
+### Phase-Werte (Apple Health)
+| Value | Bedeutung | Zählt zur Schlafdauer |
+|---|---|---|
+| Core | Leichtschlaf | ✅ |
+| Deep | Tiefschlaf | ✅ |
+| REM | REM-Schlaf | ✅ |
+| Asleep | Generisch schlafend | ✅ |
+| Awake | Wach | ❌ |
 
 ---
 
-## Shortcut 3: Workouts
+## Endpoint 3: Workout
 
-**HealthKit Query**
+`POST /api/health/import/workout`
+
+```json
+{
+  "workoutTypes":      "Running\nFunctional Strength Training",
+  "workoutStartDates": "2026-05-14T07:00:00+02:00\n2026-05-14T18:00:00+02:00",
+  "workoutEndDates":   "2026-05-14T07:45:00+02:00\n2026-05-14T19:00:00+02:00"
+}
+```
+
+### Shortcut-Konfiguration
 | Feld | Wert |
 |---|---|
 | Type | Workouts |
 | Start Date | is today |
 
-**Verfügbare Workout-Typen (werden auf TrainingType gemappt)**
+### Felder
+- `workoutTypes` → Name (workout type string)
+- `workoutStartDates` → Start Dates
+- `workoutEndDates` → End Dates
+
+### Serverseitige Logik
+- **Datum** = Datum der `workoutStartDates[0]` (alle Workouts am selben Tag)
+- **durationMinutes** = `(endDate - startDate)` pro Workout
+- `TrainingSession` erstellen; `TrainingDay` erstellen falls nicht vorhanden
+
+### Workout-Type-Mapping
 | Apple Name | → TrainingType |
 |---|---|
 | Running | CARDIO |
@@ -100,43 +119,12 @@ Alle Felder sind optional — nur vorhandene Daten werden verarbeitet.
 | Core Training | PUSH |
 | (alle anderen) | CARDIO |
 
-**Aktion im Shortcut**
-1. „Find Workouts" → Start Date is today
-2. Für jedes Workout: Name + Duration (in Minuten) + Start Date
-3. JSON bauen:
-   ```json
-   {
-     "date": "<today>",
-     "workouts": [
-       { "type": "<Name>", "durationMinutes": <Dauer>, "startDate": "<ISO>" }
-     ]
-   }
-   ```
-4. POST an `/api/health/import`
-
 ---
 
-## Shortcut 4: Alles kombiniert (empfohlen)
+## Was passiert serverseitig (Übersicht)
 
-Einen einzigen Shortcut, der alle drei Datentypen in einem Request schickt:
-
-```json
-{
-  "date": "2026-05-14",
-  "steps": 10234,
-  "sleepMinutes": 420,
-  "workouts": [
-    { "type": "Running", "durationMinutes": 45, "startDate": "2026-05-14T07:00:00+02:00" }
-  ]
-}
-```
-
----
-
-## Was passiert serverseitig
-
-| Daten | Aktion |
+| Endpoint | Aktion |
 |---|---|
-| `steps >= 10.000` | `"steps"` wird zu `RoutineLog.completedItems` hinzugefügt |
-| `sleepMinutes` | Upsert `SleepLog` für das Datum |
-| `workouts` | `TrainingSession` erstellen; `TrainingDay` erstellen falls nicht vorhanden |
+| `/import/steps` | Upsert `RoutineLog`; falls ≥ 10.000 Steps → `"steps"` in `completedItems` |
+| `/import/sleep` | Upsert `SleepLog` mit `durationMinutes` (nur Non-Awake-Stages) |
+| `/import/workout` | `TrainingSession` + ggf. neuen `TrainingDay` erstellen |
